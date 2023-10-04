@@ -1,5 +1,4 @@
 #!env python3
-#import resource
 import proxmoxer # pip install proxmoxer
 import PySimpleGUI as sg # pip install PySimpleGUI
 gui = 'TK'
@@ -215,21 +214,6 @@ def getvms(listonly = False):
 		print(f"Encountered error when querying proxmox: {e!r}")
 		return False
 
-def get_vm_resource_usage(vm):
-	try:
-		if vm['type'] == 'qemu':
-			resource_data = G.proxmox.nodes(vm['node']).qemu(str(vm['vmid'])).status.current.get()
-		else:
-			resource_data = G.proxmox.nodes(vm['node']).lxc(str(vm['vmid'])).status.current.get()
-		return resource_data
-
-	except Exception as e:
-		print(f"Error fetching resource usage")
-		return None
-
-def sort_vms(vms, key):
-	return sorted(vms, key=lambda x: x[key])
-
 def setvmlayout(vms):
 	layout = []
 	if G.imagefile:
@@ -256,7 +240,6 @@ def setvmlayout(vms):
 				else:
 					state = vm['status']
 			tmplayout =	[
-				sg.Text(vm['vmid'], font=["Helvetica", 14], size=(22*G.scaling, 1*G.scaling)),
 				sg.Text(vm['name'], font=["Helvetica", 14], size=(22*G.scaling, 1*G.scaling)),
 				sg.Text(f"State: {state}", font=["Helvetica", 0], size=(22*G.scaling, 1*G.scaling), key=vmkeyname),
 				connbutton
@@ -271,30 +254,13 @@ def setvmlayout(vms):
 				)
 			layoutcolumn.append(tmplayout)
 			layoutcolumn.append([sg.HorizontalSeparator()])
-
-		resource_data = get_vm_resource_usage(vm)
-		if resource_data:
-			cpu_usage = "{:.2f}".format(resource_data['cpu'])
-			mem_usage = format_memory_usage(resource_data['mem'])
-			layoutcolumn.append([
-				sg.Text(f"CPU Usage: {cpu_usage}%", font=["Helvetica", 12]),
-				sg.Text(f"Memory Usage: {mem_usage}", font=["Helvetica", 12])
-				])
-	if len(vms) > 5:
+	if len(vms) > 5: # We need a scrollbar
 		layout.append([sg.Column(layoutcolumn, scrollable = True, size=(None, None))])
 	else:
 		for row in layoutcolumn:
 			layout.append(row)
-	layout.append([
-		sg.Button('Logout', font=["Helvetica", 14]), 
-		sg.Button('Refresh', key='-REFRESH-', font=["Helvetica", 14]), 
-		sg.Button('Sort', key='-SORT-', font=["Helvetica", 14])
-		])
+	layout.append([sg.Button('Logout', font=["Helvetica", 14])])
 	return layout
-
-def format_memory_usage(memory_bytes):
-	memory_mb = memory_bytes / (1024 ** 2)
-	return "{:.0f} MB".format(memory_mb)
 
 def iniwin(inistring):
 	inilayout = [
@@ -438,6 +404,7 @@ def vmaction(vmnode, vmid, vmtype, action='connect'):
 	connpop.close()
 	return status
 
+
 def setcmd():
 	try:
 		if os.name == 'nt': # Windows
@@ -534,12 +501,12 @@ def loginwindow():
 					elif connected and authenticated:
 						window.close()
 						return True
-					
+					#break
+
 def showvms():
 	vms = getvms()
 	vmlist = getvms(listonly=True)
 	newvmlist = vmlist.copy()
-	current_sort_key = 'vmid'
 	if vms == False:
 		return False
 	if len(vms) < 1:
@@ -569,7 +536,6 @@ def showvms():
 							window = sg.Window(G.title, layout, return_keyboard_events=True,finalize=True, resizable=False, no_titlebar=G.kiosk, size=(G.width, G.height))
 					window.bring_to_front()
 				else: # Refresh existing vm status
-					#refresh_vm_values(window, vms)
 					newvms = getvms()
 					if newvms:
 						for vm in newvms:
@@ -591,29 +557,9 @@ def showvms():
 							window[vmkeyname].update(f"State: {state}")
 
 		event, values = window.read(timeout = 1000)
-		if event == sg.WIN_CLOSED:
-			break
-		if event == '-REFRESH-':
-			vms = getvms()
-			if vms:
-				vmlist = vms.copy()
-				layout = setvmlayout(vms)
-				window.close()
-				window = sg.Window(G.title, layout, return_keyboard_events=True, finalize=True, resizable=False, no_titlebar=G.kiosk, size=(G.width, G.height))
-				window.bring_to_front()
 		if event in ('Logout', None):
 			window.close()
 			return False
-		if event.startswith('-SORT-'):
-			current_sort_key = 'vmid' if current_sort_key == 'name' else 'name'
-			vms = sort_vms(vms, current_sort_key)
-			layout = setvmlayout(vms)
-			window.close()
-			if G.icon:
-				window = sg.Window(G.title, layout, return_keyboard_events=True, finalize=True, resizable=False, no_titlebar=G.kiosk, size=(G.width, G.height), icon=G.icon)
-			else:
-				window = sg.Window(G.title, layout, return_keyboard_events=True, finalize=True, resizable=False, no_titlebar=G.kiosk, size=(G.width, G.height))
-			window.bring_to_front()
 		if event.startswith('-CONN'):
 			eventparams = event.split('|')
 			vmid = eventparams[1][:-1]
@@ -634,7 +580,7 @@ def showvms():
 					vmaction(vm['node'], vmid, vm['type'], action='reload')
 			if not found:
 				win_popup_button(f'VM {vm["name"]} no longer availble, please contact your system administrator', 'OK')
-	return True	
+	return True
 
 def main():
 	G.scaling = 1 # TKinter requires integers
@@ -670,21 +616,6 @@ def main():
 						return 0
 				else:
 					return
-		elif (datetime.now() - timer).total_seconds() > 5:
-			timer = datetime.now()
-			newvmlist = getvms(listonly=True)
-			if newvmlist:
-				if vmlist != newvmlist:
-					vmlist = newvmlist.copy()
-					vms = getvms()
-					if vms:
-						layout = setvmlayout(vms)
-						window.close()
-						if G.icon:
-							window = sg.Window(G.title, layout, return_keyboard_events=True, finalize=True, resizable=False, no_titlebar=G.kiosk, size=(G.width, G.height), icon=G.icon)
-						else:
-							window = sg.Window(G.title, layout, return_keyboard_events=True, finalize=True, resizable=False, no_titlebar=G.kiosk, size=(G.width, G.height))
-					window.bring_to_front()
 
 if __name__ == '__main__':
 	sys.exit(main())
