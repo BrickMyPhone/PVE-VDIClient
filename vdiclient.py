@@ -41,7 +41,7 @@ class G:
 	guest_type = 'both'
 	width = None
 	height = None
-	page_size = 10
+	page_size = 5
 	timeout = 15
 	TITLE_FONT = {'size': 30, 'weight': 'bold'}
 	VM_NAME_FONT = {'size': 24, 'weight': 'bold'}
@@ -379,6 +379,20 @@ def get_vm_notes(vmnode, vmid, vmtype):
 			return config.get('description', '').strip() or '(No notes found for this VM)'
 		except Exception as e:
 			return f'Unable to retrieve notes:\n{e!r}'
+
+def get_vm_ostype(vmnode, vmid, vmtype):
+	try:
+		if vmtype == 'qemu':
+			config = G.proxmox.nodes(vmnode).qemu(str(vmid)).config.get()
+		else:
+			return 'linux'
+		ostype = config.get('ostype', '')
+		if ostype.startswith('win'):
+			return 'windows'
+		return 'linux'
+	except Exception:
+		return 'unknown'
+
 def win_popup_notes(title, notes_text):
 	root = get_hidden_root()
 	window = VDIWindow(root)
@@ -860,25 +874,32 @@ def loginwindow():
 
 
 def _build_vm_row(parent, vm, on_connect, on_reset, on_notes):
-    frame = ctk.CTkFrame(parent, corner_radius=12)
-    frame.pack(fill='x', padx=12, pady=(0, 10))
-    info_frame = ctk.CTkFrame(frame, fg_color='transparent')
-    info_frame.pack(side='left', fill='x', expand=True, padx=(0, 8))
-    name_label = ctk.CTkLabel(info_frame, text=vm['name'], font=get_font('VM_NAME_FONT'))
-    name_label.pack(anchor='w')
-    state_label = ctk.CTkLabel(info_frame, text='State: unknown', anchor='w', font=get_font('LABEL_FONT'))
-    state_label.pack(anchor='w', pady=(4, 0))
-    button_frame = ctk.CTkFrame(frame, fg_color='transparent')
-    button_frame.pack(side='right')
-    conn_button = ctk.CTkButton(button_frame, text='Connect', width=120, command=lambda: on_connect(vm), font=get_font('BUTTON_FONT'))
-    conn_button.pack(pady=(0, 4))
-    reset_button = None
-    if G.show_reset:
-        reset_button = ctk.CTkButton(button_frame, text='Reset', width=120, fg_color='#3b8ed0', hover_color='#4fa1e7', command=lambda: on_reset(vm), font=get_font('BUTTON_FONT'))
-        reset_button.pack(pady=(0, 4))
-    notes_button = ctk.CTkButton(button_frame, text='Notes', width=120, fg_color='#5a9e6f', hover_color='#6ab87f', command=lambda: on_notes(vm), font=get_font('BUTTON_FONT'))
-    notes_button.pack(pady=(0, 4))
-    return frame, state_label, conn_button, reset_button
+	frame = ctk.CTkFrame(parent, corner_radius=12)
+	frame.pack(fill='x', padx=12, pady=(0, 10))
+	info_frame = ctk.CTkFrame(frame, fg_color='transparent')
+	info_frame.pack(side='left', fill='x', expand=True, padx=(0, 8))
+	name_frame = ctk.CTkFrame(info_frame, fg_color='transparent')
+	name_frame.pack(anchor='w', fill='x')
+	os_icon = '🪟' if vm.get('_ostype') == 'windows' else '🐧' if vm.get('_ostype') == 'linux' else '💻'
+	os_label = ctk.CTkLabel(name_frame, text=os_icon, font=ctk.CTkFont(size=22))
+	os_label.pack(side='left', padx=(0, 6))
+	name_label = ctk.CTkLabel(name_frame, text=vm['name'], font=get_font('VM_NAME_FONT'))
+	name_label.pack(side='left', anchor='w')
+	state_label = ctk.CTkLabel(info_frame, text='State: unknown', anchor='w', font=get_font('LABEL_FONT'))
+	state_label.pack(anchor='w', pady=(4, 0))
+	vmid_label = ctk.CTkLabel(info_frame, text=f'VM ID: {vm["vmid"]}', anchor='w', font=get_font('LABEL_FONT'))
+	vmid_label.pack(anchor='w', pady=(2, 0))
+	button_frame = ctk.CTkFrame(frame, fg_color='transparent')
+	button_frame.pack(side='right')
+	conn_button = ctk.CTkButton(button_frame, text='Connect', width=120, command=lambda: on_connect(vm), font=get_font('BUTTON_FONT'))
+	conn_button.pack(pady=(0, 4))
+	reset_button = None
+	if G.show_reset:
+		reset_button = ctk.CTkButton(button_frame, text='Reset', width=120, fg_color='#3b8ed0', hover_color='#4fa1e7', command=lambda: on_reset(vm), font=get_font('BUTTON_FONT'))
+		reset_button.pack(pady=(0, 4))
+	notes_button = ctk.CTkButton(button_frame, text='Notes', width=120, fg_color='#5a9e6f', hover_color='#6ab87f', command=lambda: on_notes(vm), font=get_font('BUTTON_FONT'))
+	notes_button.pack(pady=(0, 4))
+	return frame, state_label, conn_button, reset_button
 
 
 def showvms():
@@ -975,6 +996,8 @@ def showvms():
 			child.destroy()
 		vm_controls.clear()
 		for i, vm in enumerate(page_items):
+			if '_ostype' not in vm:
+				vm['_ostype'] = get_vm_ostype(vm['node'], vm['vmid'], vm['type'])
 			frame, state_label, conn_button, reset_button = _build_vm_row(vm_frame, vm, on_connect, on_reset, on_notes)
 			update_vm_row(vm, state_label, conn_button)
 			vm_controls[str(vm['vmid'])] = {
