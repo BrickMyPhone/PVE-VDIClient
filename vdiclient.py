@@ -37,7 +37,7 @@ class G:
 	current_hostset = 'DEFAULT'
 	title = 'VDI Login'
 	hosts = {}
-	theme = 'LightBlue'
+	theme = 'Dark'
 	guest_type = 'both'
 	width = None
 	height = None
