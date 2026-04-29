@@ -32,7 +32,7 @@ class G:
 	kiosk = False
 	viewer_kiosk = True
 	fullscreen = True
-	show_reset = False
+	show_reset = True
 	show_hibernate = False
 	current_hostset = 'DEFAULT'
 	title = 'VDI Login'
@@ -369,6 +369,40 @@ def set_window_icon(window):
 			pass
 	# Delaying execution by 200ms allows CustomTkinter to finish its own icon initialization first
 	window.after(200, _apply_icon)
+
+def get_vm_notes(vmnode, vmid, vmtype):
+		try:
+			if vmtype == 'qemu':
+				config = G.proxmox.nodes(vmnode).qemu(str(vmid)).config.get()
+			else:
+				config = G.proxmox.nodes(vmnode).lxc(str(vmid)).config.get()
+			return config.get('description', '').strip() or '(No notes found for this VM)'
+		except Exception as e:
+			return f'Unable to retrieve notes:\n{e!r}'
+def win_popup_notes(title, notes_text):
+	root = get_hidden_root()
+	window = VDIWindow(root)
+	window.title(f'Notes: {title}')
+	window.resizable(True, True)
+	set_window_icon(window)
+	frame = ctk.CTkFrame(window, corner_radius=12)
+	frame.pack(padx=18, pady=18, fill='both', expand=True)
+	header = ctk.CTkLabel(frame, text=f'Notes for {title}', font=get_font('VM_NAME_FONT'))
+	header.pack(pady=(10, 8))
+	ctk.CTkFrame(frame, height=2, fg_color=("gray70", "gray30")).pack(fill='x', padx=10, pady=(0, 10))
+	text_box = ctk.CTkTextbox(frame, width=500, height=300, corner_radius=8, font=get_font('DEFAULT_FONT'), wrap='word')
+	text_box.pack(padx=10, pady=(0, 10), fill='both', expand=True)
+	text_box.insert('0.0', notes_text)
+	text_box.configure(state='disabled')
+	close_btn = ctk.CTkButton(frame, text='Close', command=window.destroy, font=get_font('BUTTON_FONT'))
+	close_btn.pack(pady=(0, 10))
+	window.geometry('560x420')
+	center_window(window)
+	if not G.kiosk:
+		window.grab_set()
+	window.lift()
+	window.focus_force()
+	window.wait_window()	
 
 
 def win_popup(message):
@@ -825,24 +859,26 @@ def loginwindow():
 	return False, False
 
 
-def _build_vm_row(parent, vm, on_connect, on_reset):
-	frame = ctk.CTkFrame(parent, corner_radius=12)
-	frame.pack(fill='x', padx=12, pady=(0, 10))
-	info_frame = ctk.CTkFrame(frame, fg_color='transparent')
-	info_frame.pack(side='left', fill='x', expand=True, padx=(0, 8))
-	name_label = ctk.CTkLabel(info_frame, text=vm['name'], font=get_font('VM_NAME_FONT'))
-	name_label.pack(anchor='w')
-	state_label = ctk.CTkLabel(info_frame, text='State: unknown', anchor='w', font=get_font('LABEL_FONT'))
-	state_label.pack(anchor='w', pady=(4, 0))
-	button_frame = ctk.CTkFrame(frame, fg_color='transparent')
-	button_frame.pack(side='right')
-	conn_button = ctk.CTkButton(button_frame, text='Connect', width=120, command=lambda: on_connect(vm), font=get_font('BUTTON_FONT'))
-	conn_button.pack(pady=(0, 4))
-	reset_button = None
-	if G.show_reset:
-		reset_button = ctk.CTkButton(button_frame, text='Reset', width=120, fg_color='#3b8ed0', hover_color='#4fa1e7', command=lambda: on_reset(vm), font=get_font('BUTTON_FONT'))
-		reset_button.pack(pady=(0, 4))
-	return frame, state_label, conn_button, reset_button
+def _build_vm_row(parent, vm, on_connect, on_reset, on_notes):
+    frame = ctk.CTkFrame(parent, corner_radius=12)
+    frame.pack(fill='x', padx=12, pady=(0, 10))
+    info_frame = ctk.CTkFrame(frame, fg_color='transparent')
+    info_frame.pack(side='left', fill='x', expand=True, padx=(0, 8))
+    name_label = ctk.CTkLabel(info_frame, text=vm['name'], font=get_font('VM_NAME_FONT'))
+    name_label.pack(anchor='w')
+    state_label = ctk.CTkLabel(info_frame, text='State: unknown', anchor='w', font=get_font('LABEL_FONT'))
+    state_label.pack(anchor='w', pady=(4, 0))
+    button_frame = ctk.CTkFrame(frame, fg_color='transparent')
+    button_frame.pack(side='right')
+    conn_button = ctk.CTkButton(button_frame, text='Connect', width=120, command=lambda: on_connect(vm), font=get_font('BUTTON_FONT'))
+    conn_button.pack(pady=(0, 4))
+    reset_button = None
+    if G.show_reset:
+        reset_button = ctk.CTkButton(button_frame, text='Reset', width=120, fg_color='#3b8ed0', hover_color='#4fa1e7', command=lambda: on_reset(vm), font=get_font('BUTTON_FONT'))
+        reset_button.pack(pady=(0, 4))
+    notes_button = ctk.CTkButton(button_frame, text='Notes', width=120, fg_color='#5a9e6f', hover_color='#6ab87f', command=lambda: on_notes(vm), font=get_font('BUTTON_FONT'))
+    notes_button.pack(pady=(0, 4))
+    return frame, state_label, conn_button, reset_button
 
 
 def showvms():
@@ -907,6 +943,12 @@ def showvms():
 	def on_reset(vm):
 		vmaction(vm['node'], vm['vmid'], vm['type'], action='reload')
 
+	def on_notes(vm):
+		loading = win_popup(f'Loading notes for {vm["name"]}...')
+		notes = get_vm_notes(vm['node'], vm['vmid'], vm['type'])
+		loading.close()
+		win_popup_notes(vm['name'], notes)
+
 	def update_page_controls():
 		page_label.configure(text=f'Page {current_page + 1} of {total_pages}')
 		prev_button.configure(state='normal' if current_page > 0 else 'disabled')
@@ -933,7 +975,7 @@ def showvms():
 			child.destroy()
 		vm_controls.clear()
 		for i, vm in enumerate(page_items):
-			frame, state_label, conn_button, reset_button = _build_vm_row(vm_frame, vm, on_connect, on_reset)
+			frame, state_label, conn_button, reset_button = _build_vm_row(vm_frame, vm, on_connect, on_reset, on_notes)
 			update_vm_row(vm, state_label, conn_button)
 			vm_controls[str(vm['vmid'])] = {
 				'state': state_label,
