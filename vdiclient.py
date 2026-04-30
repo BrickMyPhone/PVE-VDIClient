@@ -393,6 +393,24 @@ def get_vm_ostype(vmnode, vmid, vmtype):
 	except Exception:
 		return 'unknown'
 
+def get_vm_screenshot(vmnode, vmid, vmtype):
+	try:
+		if vmtype != 'qemu':
+			return None
+		result = G.proxmox.nodes(vmnode).qemu(str(vmid)).screenshot.get()
+		if result:
+			if isinstance(result, str):
+				img_data = base64.b64decode(result)
+			else:
+				img_data = result
+			from PIL import Image
+			img = Image.open(BytesIO(img_data))
+			img.thumbnail((200, 120), Image.LANCZOS)
+			return ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+		return None
+	except Exception:
+		return None
+
 def win_popup_notes(title, notes_text):
 	root = get_hidden_root()
 	window = VDIWindow(root)
@@ -876,6 +894,16 @@ def loginwindow():
 def _build_vm_row(parent, vm, on_connect, on_reset, on_notes):
 	frame = ctk.CTkFrame(parent, corner_radius=12)
 	frame.pack(fill='x', padx=12, pady=(0, 10))
+
+	# Left: screenshot preview
+	preview_frame = ctk.CTkFrame(frame, fg_color=("gray85", "gray20"), corner_radius=8, width=200, height=120)
+	preview_frame.pack(side='left', padx=(10, 8), pady=10)
+	preview_frame.pack_propagate(False)
+	preview_label = ctk.CTkLabel(preview_frame, text='No Preview', font=get_font('DEFAULT_FONT'), text_color=("gray50", "gray60"))
+	preview_label.place(relx=0.5, rely=0.5, anchor='center')
+	vm['_preview_label'] = preview_label
+
+	# Middle: info
 	info_frame = ctk.CTkFrame(frame, fg_color='transparent')
 	info_frame.pack(side='left', fill='x', expand=True, padx=(0, 8))
 	name_frame = ctk.CTkFrame(info_frame, fg_color='transparent')
@@ -889,8 +917,10 @@ def _build_vm_row(parent, vm, on_connect, on_reset, on_notes):
 	state_label.pack(anchor='w', pady=(4, 0))
 	vmid_label = ctk.CTkLabel(info_frame, text=f'VM ID: {vm["vmid"]}', anchor='w', font=get_font('LABEL_FONT'))
 	vmid_label.pack(anchor='w', pady=(2, 0))
+
+	# Right: buttons
 	button_frame = ctk.CTkFrame(frame, fg_color='transparent')
-	button_frame.pack(side='right')
+	button_frame.pack(side='right', padx=(0, 10))
 	conn_button = ctk.CTkButton(button_frame, text='Connect', width=120, command=lambda: on_connect(vm), font=get_font('BUTTON_FONT'))
 	conn_button.pack(pady=(0, 4))
 	reset_button = None
@@ -925,8 +955,14 @@ def showvms():
 	title_label.pack(pady=(0, 6))
 	subtitle = ctk.CTkLabel(container, text='Please select a desktop instance to connect to', font=get_font('LABEL_FONT'))
 	subtitle.pack(pady=(0, 14))
-	ctk.CTkFrame(container, height=4, fg_color=("gray70", "gray30")).pack(fill='x', padx=10, pady=(0, 14))
+	ctk.CTkFrame(container, height=4, fg_color=("gray70", "gray30")).pack(fill='x', padx=10, pady=(0, 10))
+	search_var = ctk.StringVar()
+	search_entry = ctk.CTkEntry(container, placeholder_text='🔍  Search by name or VM ID...', textvariable=search_var, font=get_font('DEFAULT_FONT'))
+	search_entry.pack(fill='x', padx=10, pady=(0, 10))
 	# Initialize current_page to 0 before calculating total_pages
+	def on_search(*args):
+		build_vm_list(getvms() or [])
+	search_var.trace_add('write', on_search)
 	current_page = 0
 	visible_vms = [vm for vm in vms if vm.get('status') != 'unknown']
 	total_pages = max(1, math.ceil(len(visible_vms) / G.page_size))
@@ -985,7 +1021,12 @@ def showvms():
 	next_button.configure(command=lambda: change_page(1))
 
 	def build_vm_list(vms_to_render):
-		filtered_vms = [vm for vm in vms_to_render if vm.get('status') != 'unknown']
+		query = search_var.get().strip().lower()
+		filtered_vms = [
+			vm for vm in vms_to_render
+			if vm.get('status') != 'unknown'
+			and (not query or query in vm['name'].lower() or query in str(vm['vmid']))
+		]
 		nonlocal total_pages, current_page
 		total_pages = max(1, math.ceil(len(filtered_vms) / G.page_size))
 		current_page = min(current_page, total_pages - 1)
@@ -1000,6 +1041,13 @@ def showvms():
 				vm['_ostype'] = get_vm_ostype(vm['node'], vm['vmid'], vm['type'])
 			frame, state_label, conn_button, reset_button = _build_vm_row(vm_frame, vm, on_connect, on_reset, on_notes)
 			update_vm_row(vm, state_label, conn_button)
+			if vm.get('status') == 'running':
+				def load_screenshot(v=vm):
+					img = get_vm_screenshot(v['node'], v['vmid'], v['type'])
+					if img and '_preview_label' in v and v['_preview_label'].winfo_exists():
+						v['_preview_label'].configure(image=img, text='')
+						v['_preview_label']._screenshot_img = img
+				frame.after(200, load_screenshot)
 			vm_controls[str(vm['vmid'])] = {
 				'state': state_label,
 				'button': conn_button

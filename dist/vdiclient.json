@@ -1,8 +1,8 @@
 {
 	"upgrade_guid" : "46cbad92-353e-4b28-9bee-83950991dad8",
-	"version" : "3.0.0",
+	"version" : "3.0.2",
 	"product_name" : "VDI Client",
-	"manufacturer" : "Josh Patten",
+	"manufacturer" : "Ali Can",
 	"name" : "VDI Client",
 	"name_base" : "vdiclient",
 	"arch": 64,
