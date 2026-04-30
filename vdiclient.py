@@ -392,8 +392,6 @@ def get_vm_ostype(vmnode, vmid, vmtype):
 		return 'linux'
 	except Exception:
 		return 'unknown'
-
-def get_vm_screenshot(vmnode, vmid, vmtype):
 	try:
 		if vmtype != 'qemu':
 			return None
@@ -895,14 +893,6 @@ def _build_vm_row(parent, vm, on_connect, on_reset, on_notes):
 	frame = ctk.CTkFrame(parent, corner_radius=12)
 	frame.pack(fill='x', padx=12, pady=(0, 10))
 
-	# Left: screenshot preview
-	preview_frame = ctk.CTkFrame(frame, fg_color=("gray85", "gray20"), corner_radius=8, width=200, height=120)
-	preview_frame.pack(side='left', padx=(10, 8), pady=10)
-	preview_frame.pack_propagate(False)
-	preview_label = ctk.CTkLabel(preview_frame, text='No Preview', font=get_font('DEFAULT_FONT'), text_color=("gray50", "gray60"))
-	preview_label.place(relx=0.5, rely=0.5, anchor='center')
-	vm['_preview_label'] = preview_label
-
 	# Middle: info
 	info_frame = ctk.CTkFrame(frame, fg_color='transparent')
 	info_frame.pack(side='left', fill='x', expand=True, padx=(0, 8))
@@ -1041,13 +1031,6 @@ def showvms():
 				vm['_ostype'] = get_vm_ostype(vm['node'], vm['vmid'], vm['type'])
 			frame, state_label, conn_button, reset_button = _build_vm_row(vm_frame, vm, on_connect, on_reset, on_notes)
 			update_vm_row(vm, state_label, conn_button)
-			if vm.get('status') == 'running':
-				def load_screenshot(v=vm):
-					img = get_vm_screenshot(v['node'], v['vmid'], v['type'])
-					if img and '_preview_label' in v and v['_preview_label'].winfo_exists():
-						v['_preview_label'].configure(image=img, text='')
-						v['_preview_label']._screenshot_img = img
-				frame.after(200, load_screenshot)
 			vm_controls[str(vm['vmid'])] = {
 				'state': state_label,
 				'button': conn_button
